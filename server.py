@@ -14,7 +14,7 @@ from sqlite3 import Connection
 import threading
 from xmlrpc.client import Server
 from collections import OrderedDict
-
+ 
 import logging
 logging.basicConfig(filename="stds.log", 
 					format='%(asctime)s %(message)s', 
@@ -139,32 +139,6 @@ def decode_headers(headers):       #return chunk_id , chunk_size
 
 
 
-def setup_broadcast():
-    for i in range(NUM_CLIENTS):
-        #udp socket init
-
-        print('setting up broadcast....')
-        server_UDP = socket.socket(socket.AF_INET , socket.SOCK_DGRAM)
-        server_UDP.bind((SERVER , 7000+i))
-        server_cnct_msg_udp = 'HELLO!'  #sending hi to server to save addr
-        server_cnct_msg_udp = server_cnct_msg_udp.encode(ENCODING)
-        server_UDP.sendto(server_cnct_msg_udp,client_port_id[0][1])
-        print(f'The server port# {server_UDP.getsockname()[1]} is connected(udp) and ready for broadcast!')
-        server_broadcast_sock.append(server_UDP)
-
-
-def init_tcp_ports_broadcast():
-    for i in range(NUM_CLIENTS):
-        all_pack_rec_lis.append(False)
-        ADDR_SERVER_TCP = (SERVER , i+9000)
-        server_TCP = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_TCP.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server_TCP.bind(ADDR_SERVER_TCP)
-        server_TCP.listen()
-        server_broadcast_tcp.append(server_TCP)
-        print(f'tcp broadcast reply receiver #{i} initialised !')
-
-
 
 
 def make_header(chunk_id ,  chunk_size ):
@@ -235,6 +209,34 @@ def distribute_file_to_clients(filename):
         print(f'Sending chunk #{i} to client #{i%NUM_CLIENTS}')
         send_chunk(chunk_list[i], client_port_id[i%NUM_CLIENTS][0])
     
+#udp ports to recieve chunk request from the clients 
+
+
+def setup_broadcast():
+    for i in range(NUM_CLIENTS):
+        #udp socket init
+
+        print('setting up broadcast....')
+        server_UDP = socket.socket(socket.AF_INET , socket.SOCK_DGRAM)
+        server_UDP.bind((SERVER , 7000+i))
+        server_cnct_msg_udp = 'HELLO!'  #sending hi to server to save addr
+        server_cnct_msg_udp = server_cnct_msg_udp.encode(ENCODING)
+        server_UDP.sendto(server_cnct_msg_udp,client_port_id[0][1])
+        print(f'The server port# {server_UDP.getsockname()[1]} is connected(udp) and ready for broadcast!')
+        server_broadcast_sock.append(server_UDP)
+
+
+def init_tcp_ports_broadcast():
+    for i in range(NUM_CLIENTS):
+        all_pack_rec_lis.append(False)
+        ADDR_SERVER_TCP = (SERVER , i+9000)
+        server_TCP = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_TCP.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_TCP.bind(ADDR_SERVER_TCP)
+        server_TCP.listen()
+        server_broadcast_tcp.append(server_TCP)
+        print(f'tcp broadcast reply receiver #{i} initialised !')
+
 
 
 def broadcast(request , udp_client_port):
@@ -256,6 +258,7 @@ def broadcast(request , udp_client_port):
 
     server_UDP_random.close()
 
+#server tcp ports to recieve chunks from the clients 
 
 def accept_tcp(id):
     global lock , server_broadcast_tcp, duplicate, all_pack_rec, all_pack_rec_lis
@@ -329,6 +332,7 @@ def send_reqeuested_chunk(id):
                     timeout = time.time() + 5
                     while lru_cache.get(request) == -1  :
                         if time.time() > timeout:
+                            
                             break
                         pass
                     if lru_cache.get(request) == -1:
@@ -358,6 +362,9 @@ def send_reqeuested_chunk(id):
                 server_TCP_random.send(send_chunk)
 
 
+
+
+
 TCP_threads = []
 
 def handle_client_chunks():
@@ -377,7 +384,7 @@ def handle_client_request():
     
 
 new_connection()
-distribute_file_to_clients('OneDrive_1_7-9-2022/A2_large_file.txt')
+distribute_file_to_clients('OneDrive_1_7-9-2022/A2_small_file.txt')
 # send_reqeuested_chunk(client_port_id[0] , 0)
 init_tcp_ports_broadcast()
 

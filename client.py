@@ -137,22 +137,8 @@ def init_clients():
         new_client(client_num+6000)
 
 
-def setup_broadcast():
-    while True :
-        server_port_UDP, addr_UDP = clients[0][1].recvfrom(6)
-        server_broadcast_sock.append(addr_UDP)
-        print(f'UDP broadcast is active with server #{addr_UDP[1] - 7000} ')
-      
-        if len(server_broadcast_sock) == NUM_CLIENTS:
-            print('Broadcast initialised!')
-            break
 
 
-
-
-
-# print(clients)
-# acquire_file_chunks(clients=clients)
 
 
 def receive_chunk(client, id ):
@@ -160,8 +146,6 @@ def receive_chunk(client, id ):
     global lock , clients_chunks, map_chunk_id_to_ind, HEADER_SIZE , TOTAL_SIZE
     
     connected =  True 
-    local_chunks = []       #chunks that the client has received 
-    local_map = {}          #dictonary mapping the chunk_id to the index of the chunk in the client 
     server_chunk_list_size = 0 
     while connected:    #   receiving initially from the server 
         msg =client.recv(TOTAL_SIZE)
@@ -187,16 +171,11 @@ def receive_chunk(client, id ):
         
             
             clients_chunks[id].append((chunk_id , chunk_size , data))
-            local_chunks.append((chunk_id , chunk_size , data))
-            local_map[chunk_id] = len(local_chunks) - 1 
-            map_chunk_id_to_ind[id][chunk_id] = len(local_chunks) - 1 
+            map_chunk_id_to_ind[id][chunk_id] = len(clients_chunks[id]) - 1 
     client.close()
 
 
 
-    
-            
-        
 threads = [] 
 
 def acquire_file_chunks(clients):
@@ -207,7 +186,53 @@ def acquire_file_chunks(clients):
     for x in threads:
         x.join()
  
+ 
+def setup_broadcast():
+    while True :
+        server_port_UDP, addr_UDP = clients[0][1].recvfrom(6)
+        server_broadcast_sock.append(addr_UDP)
+        print(f'UDP broadcast is active with server #{addr_UDP[1] - 7000} ')
+      
+        if len(server_broadcast_sock) == NUM_CLIENTS:
+            print('Broadcast initialised!')
+            break
 
+def adjust_data_size(data):
+    data += b' '*(CHUNK_SIZE - len(data))
+    return data
+
+def handle_broadcast(id):           #recieves request from server 
+    
+    while True :
+
+        request, addr_UDP = clients[id][1].recvfrom(REQUEST_SIZE_1)        
+        req_chunk_id = int(request[0:REQUEST_SIZE].decode())
+
+        req_client_id = int(request[REQUEST_SIZE:].decode())
+        
+        print(f'chunk #{req_chunk_id} request from server to client {id} ')
+        if req_chunk_id == -1 :
+            break
+        #checking if the packet exist 
+        
+        if req_chunk_id in map_chunk_id_to_ind[id]:
+            server_ADDR_TCP_random = (server, 9000+id)
+            client_TCP_random = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_TCP_random.connect(server_ADDR_TCP_random)
+            chunk_id , chunk_size , data = clients_chunks[id][map_chunk_id_to_ind[id][req_chunk_id]]
+
+            header = make_header(chunk_id , chunk_size)
+            
+            sending = header + data 
+            client_TCP_random.send(sending)
+            
+            client_TCP_random.close()
+            print(f'client #{id} sent requested chunk #{req_chunk_id} to the server and connection is closed!')
+
+            print(f'Client #{id} sending chunk #{chunk_id} to the server port #{req_chunk_id}')
+        else :
+            pass
+    
 
 def request_chunk(chunk_id  , id ):
     global clients_chunks , map_chunk_id_to_ind 
@@ -242,7 +267,7 @@ def request_chunk(chunk_id  , id ):
                 cont = True 
 
             except  socket.timeout:
-                logger.info(f'UDP packet was dropped ... re-requesting the packet #{chunk_id} for client #{id}')
+                logger.info(f'packet was dropped ... re-requesting the packet #{chunk_id} for client #{id}')
                 pass
             if cont == True :
                 logger.info(f'client #{id} has recieved the requested chunk #{chunk_id}') 
@@ -291,42 +316,6 @@ def request_remaining_files(id):
     client_TCP_random.close()
     request_chunk(-1  , id )     
             
-def adjust_data_size(data):
-    data += b' '*(CHUNK_SIZE - len(data))
-    return data
-
-def handle_broadcast(id):           #recieves request from server 
-    
-    while True :
-
-        request, addr_UDP = clients[id][1].recvfrom(REQUEST_SIZE_1)        
-        req_chunk_id = int(request[0:REQUEST_SIZE].decode())
-
-        req_client_id = int(request[REQUEST_SIZE:].decode())
-        
-        print(f'chunk #{req_chunk_id} request from server to client {id} ')
-        if req_chunk_id == -1 :
-            break
-        #checking if the packet exist 
-        
-        if req_chunk_id in map_chunk_id_to_ind[id]:
-            server_ADDR_TCP_random = (server, 9000+id)
-            client_TCP_random = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client_TCP_random.connect(server_ADDR_TCP_random)
-            chunk_id , chunk_size , data = clients_chunks[id][map_chunk_id_to_ind[id][req_chunk_id]]
-
-            header = make_header(chunk_id , chunk_size)
-            
-            sending = header + data 
-            client_TCP_random.send(sending)
-            
-            client_TCP_random.close()
-            print(f'client #{id} sent requested chunk #{req_chunk_id} to the server and connection is closed!')
-
-            print(f'Client #{id} sending chunk #{chunk_id} to the server port #{req_chunk_id}')
-        else :
-            pass
-    
 RRA_threads = [] 
 def req_rem_all_c():
     for id in range(NUM_CLIENTS):
@@ -363,9 +352,6 @@ def combine(id ):
     f.write(bytes_obj)
     f.close()
 
-
-
-        
 
 
 def combine_chunks():
