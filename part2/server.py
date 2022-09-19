@@ -418,7 +418,7 @@ def handle_client_request():
 
 new_connection()
 
-distribute_file_to_clients('OneDrive_1_7-9-2022/A2_large_file.txt')
+distribute_file_to_clients('OneDrive_1_7-9-2022/A2_small_file.txt')
 setup_udp_receive_chunks()
 init_tcp_ports_broadcast()
 
@@ -429,3 +429,4 @@ for x in TCP_threads:
     x.join()
 
 end_time = time.time() 
+logger.info(f'Total time taken by the code = {end_time - start_time}')

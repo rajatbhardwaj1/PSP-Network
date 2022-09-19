@@ -421,3 +421,4 @@ for  i in range(NUM_CLIENTS):
     print("md5 sum:",hash)
 
 end_time = time.time() 
+logger.info(f'Total time taken by the code = {end_time - start_time}')
