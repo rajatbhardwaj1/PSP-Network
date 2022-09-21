@@ -27,7 +27,6 @@ PORT_SERVER_TCP = 5055
 
 HASHFUNC = hashlib.md5()
 
-start_time = time.time()
 
 ENCODING = 'utf-8'
 
@@ -58,11 +57,11 @@ CLIENT_NAME_SIZE = 8
 REQUEST_SIZE_1 = CLIENT_NAME_SIZE + REQUEST_SIZE
 
 
-NUM_CLIENTS = 5 
+NUM_CLIENTS = 5
 
 ACKNOWLEDGEMENT_SIZE = 10
 
-
+RTT = []
 client_binded_tcp = [] 
 all_chunks_rec = 0 
 
@@ -74,7 +73,7 @@ for i in range (NUM_CLIENTS):
 
 def new_client(client_port_udp):
     global PORT_SERVER_UDP, PORT_SERVER_TCP, server
-
+    RTT.append([])
     server_ADDR_TCP = (server, PORT_SERVER_TCP )
 
     #tcp socket init
@@ -133,7 +132,7 @@ def decode_headers(headers):       #return chunk_id , chunk_size
 #for initialising the clients 
 def init_clients():
     global PORT_SERVER_TCP, PORT_SERVER_UDP, server,lock
-
+    
     print('connecting clients to server ...')
   
    
@@ -174,10 +173,10 @@ def receive_chunk(client, id ):
                         print('value of headers = ', header)
                     required_chunk_id = len(clients_chunks[id]) * 5 + id 
                     if chunk_id == required_chunk_id:
-                        print(f'client #{id} recieved chunk #{chunk_id} from server')
+                        # print(f'client #{id} recieved chunk #{chunk_id} from server')
                         data = msg[HEADER_SIZE:]
                         
-                        logger.info(f'chunk {chunk_id} received by client {client.getsockname()}')
+                        #logger.info(f'chunk {chunk_id} received by client {client.getsockname()}')
                     
                         clients_chunks[id].append((chunk_id , chunk_size , data))
                         map_chunk_id_to_ind[id][chunk_id] = len(clients_chunks[id]) - 1 
@@ -185,7 +184,7 @@ def receive_chunk(client, id ):
                         break
                         
                     else :
-                        logger.log(f'chunk recieved was already present !')
+                        #logger.log(f'chunk recieved was already present !')
                         pass
             except socket.timeout:
                 pass
@@ -229,7 +228,7 @@ def handle_broadcast(id):           #recieves request from server
 
         req_client_id = int(request[REQUEST_SIZE:].decode())
         
-        print(f'chunk #{req_chunk_id} request from server to client {id} ')
+        # print(f'chunk #{req_chunk_id} request from server to client {id} ')
         if req_chunk_id == -1 :
             break
         # checking if the packet exist 
@@ -249,9 +248,9 @@ def handle_broadcast(id):           #recieves request from server
 
             client_UDP_random.close()
 
-            print(f'client #{id} sent requested chunk #{req_chunk_id} to the server and connection is closed!')
+            # print(f'client #{id} sent requested chunk #{req_chunk_id} to the server and connection is closed!')
 
-            print(f'Client #{id} sending chunk #{chunk_id} to the server port #{req_chunk_id}')
+            # print(f'Client #{id} sending chunk #{chunk_id} to the server port #{req_chunk_id}')
         else :
             pass
  
@@ -262,7 +261,7 @@ def adjust_data_size(data):
 
 def request_chunk(chunk_id  , id ):
     global clients_chunks , map_chunk_id_to_ind 
-    logger.info(f'client #{id} requesting chunk id #{chunk_id} from the server!')
+    #logger.info(f'client #{id} requesting chunk id #{chunk_id} from the server!')
 
 
 
@@ -279,15 +278,17 @@ def request_chunk(chunk_id  , id ):
 
         # client_TCP_random.close()
 
+
         server_ADDR_TCP_random = (server, 9000+id)
 
         client_TCP_random = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         client_TCP_random.connect(server_ADDR_TCP_random)
+        start_time_chunk = time.time() 
 
         client_TCP_random.send(request)
         
-        logger.info(f'Client #{id} is ready to acquire missing chunk #{chunk_id}')
+        #logger.info(f'Client #{id} is ready to acquire missing chunk #{chunk_id}')
 
 
         #code this ...................................
@@ -297,20 +298,22 @@ def request_chunk(chunk_id  , id ):
                 # conn , addr_serv = client_binded_tcp[id].accept()
                 # message = conn.recv(TOTAL_SIZE)
                 message, addr_UDP = clients[id][1].recvfrom(TOTAL_SIZE)        
-
+                end_time_chunk = time.time()
+                RTT[id].append(end_time_chunk - start_time_chunk)
+                logger.info(f'The Round Trip Time(RTT) for requested chunk #{chunk_id} for client #{id} is {end_time_chunk - start_time_chunk}')
                 cont = True 
 
             except  socket.timeout:
-                logger.info(f'packet was dropped ... re-requesting the packet #{chunk_id} for client #{id}')
+                #logger.info(f'packet was dropped ... re-requesting the packet #{chunk_id} for client #{id}')
                 #handel this 
                 pass
             if cont == True :
-                logger.info(f'client #{id} has recieved the requested chunk #{chunk_id}') 
+                # logger.info(f'client #{id} has recieved the requested chunk #{chunk_id}') 
                 header = message[0:HEADER_SIZE]
                 header = header.decode()
                 chunk_id_1 , chunk_size = decode_headers(header)
                 data = message[HEADER_SIZE:]
-                logger.info(f'The requested chunk #{chunk_id} received by client #{clients[id][1].getsockname()[1] - 6000} !')
+                #logger.info(f'The requested chunk #{chunk_id} received by client #{clients[id][1].getsockname()[1] - 6000} !')
                 clients_chunks[id].append((chunk_id , chunk_size , data))
                 map_chunk_id_to_ind[id][chunk_id] = len(clients_chunks[id]) - 1 
                 break
@@ -318,7 +321,8 @@ def request_chunk(chunk_id  , id ):
             break
 
     if chunk_id % 1000 == 0 :
-        logger.info(f'Time taken for {chunk_id} chunks to be recieved by client #{id} is {time.time() - start_time}')
+        pass
+        #logger.info(f'Time taken for {chunk_id} chunks to be recieved by client #{id} is {time.time() - start_time}')
 
 
 
@@ -329,6 +333,8 @@ def request_remaining_files(id):
           
     for chunk_id in range(clients_chunks[id][-1][0]):
         if chunk_id  in map_chunk_id_to_ind[id]  :
+            RTT[id].append(0)
+
             pass
         else:
             request_chunk(chunk_id , id)
@@ -374,10 +380,9 @@ def req_rem_all_c():
 def combine(id ):
     i = len(clients_chunks[id])
     f = open ('client_'+str(id)+'.txt' , 'w')
-    w = open ('testing.txt' , 'w')
     
     array = bytearray(b'')
-    logger.info(f'The last chunk is {len(map_chunk_id_to_ind[id])}')
+    #logger.info(f'The last chunk is {len(map_chunk_id_to_ind[id])}')
     for chunk_id in range(len(clients_chunks[id]) - 1):
         chunk_id_1 , chunk_size , data  = clients_chunks[id][map_chunk_id_to_ind[id][chunk_id]]
         data =  data[0:chunk_size]
@@ -387,7 +392,6 @@ def combine(id ):
             array.append(b)
     
     bytes_obj = bytes(array)
-    w.write(str(bytes_obj))
     bytes_obj = bytes_obj.decode(ENCODING)
     f.write(bytes_obj)
     f.close()
@@ -404,6 +408,8 @@ init_clients()
 acquire_file_chunks(clients)
 setup_udp_receive_chunks()
 server_request_handel()
+start_time = time.time()
+
 req_rem_all_c()
 
 for x in RRA_threads:
@@ -421,4 +427,18 @@ for  i in range(NUM_CLIENTS):
     print("md5 sum:",hash)
 
 end_time = time.time() 
-logger.info(f'Total time taken by the code = {end_time - start_time}')
+
+time_taken = float(end_time - start_time)
+logger.info(f'Total time taken for acquiring missing chunks = {time_taken} seconds')
+numchunks = len(clients_chunks[0]) 
+average_rtt = time_taken / numchunks
+logger.info(f'Total number of chunks = {numchunks}')
+logger.info(f'Average RTT = {average_rtt}')
+plot = open('chunk_rtt.txt' , 'w')
+for i in range(len(RTT[0])):
+    total_rtt = 0 
+    for id in range(NUM_CLIENTS):
+        total_rtt += RTT[id][i]
+    logger.info(f'The average rtt of chunk #{i} over all clients is {total_rtt / NUM_CLIENTS}')
+    plot.write(str(total_rtt / NUM_CLIENTS)+'\n')
+

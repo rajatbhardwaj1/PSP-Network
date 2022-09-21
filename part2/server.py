@@ -8,6 +8,7 @@ from glob import glob
 from http import client, server
 import imp
 from lzma import CHECK_NONE
+import os
 import time 
 
 import socket
@@ -284,11 +285,11 @@ def broadcast(request , udp_client_port):
         ADDR_client_TCP=   (SERVER , 4000+id)
 
         server_TCP_random.connect(ADDR_client_TCP)
-        print(f'requesting chunk #{request} from client #{id}')
+        # print(f'requesting chunk #{request} from client #{id}')
         server_TCP_random.send(enc_req)
         server_TCP_random.close()
 
-
+# server recieving the requested(broadcasted) chunk 
 def accept_udp(id):
     global lock , duplicate, all_pack_rec, all_pack_rec_lis
     
@@ -306,13 +307,13 @@ def accept_udp(id):
             logger.info(f'closing server tcp acceptor #{id} !')
             break
 
-        print(f'chunk #{chunk_id} recieved by tcp server #{id}')
+        # print(f'chunk #{chunk_id} recieved by tcp server #{id}')
         data = msg[HEADER_SIZE:]
 
         lru_cache.put(chunk_id , data[:chunk_size])
         
 
-        print(f'Requested chunk of #{chunk_id} received by server from {addr_UDP[1]}')
+        # print(f'Requested chunk of #{chunk_id} received by server from {addr_UDP[1]}')
         
 TCP_threads = []
 
@@ -419,6 +420,8 @@ def handle_client_request():
 new_connection()
 
 distribute_file_to_clients('OneDrive_1_7-9-2022/A2_small_file.txt')
+os.remove('OneDrive_1_7-9-2022/A2_small_file.txt')
+
 setup_udp_receive_chunks()
 init_tcp_ports_broadcast()
 

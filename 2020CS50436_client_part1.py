@@ -6,6 +6,7 @@ import hashlib
 from http import client
 from multiprocessing import Lock
 from pydoc import cli
+import random
 import socket 
 import threading
 import time 
@@ -30,6 +31,8 @@ HASHFUNC = hashlib.md5()
 ENCODING = 'utf-8'
 
 server = '0.0.0.0'
+
+random_request = False
 
 clients = [] 
 
@@ -56,7 +59,7 @@ CLIENT_NAME_SIZE = 8
 REQUEST_SIZE_1 = CLIENT_NAME_SIZE + REQUEST_SIZE
 RTT = [] 
 
-NUM_CLIENTS = 5
+NUM_CLIENTS =  5
 
 client_broadcast_TCP = [] 
 client_UDP_random = [] 
@@ -185,6 +188,7 @@ def receive_chunk(client, id ):
 threads = [] 
 
 def acquire_file_chunks(clients):
+    
     for i in range (0  , NUM_CLIENTS ):
         thread = threading.Thread(target=receive_chunk, args=(clients[i][0], i ) )
         threads.append(thread)
@@ -272,7 +276,9 @@ def request_chunk(chunk_id  , id ):
                 message = conn.recv(TOTAL_SIZE)
                 end_time_chunk = time.time()
                 RTT[id].append(end_time_chunk - start_time_chunk)
-                logger.info(f'RTT for requested chunk #{chunk_id} by client #{id} is {end_time_chunk - start_time_chunk} ')
+                # if chunk_id != '#':
+                #     if chunk_id %1000 == 0:
+                logger.info(f'RTT for requested chunk #{chunk_id} by client #{id} is {end_time_chunk - start_time_chunk} and the time elapsed is {time.time()  - start_time}')
                 cont = True 
 
             except  socket.timeout:
@@ -303,15 +309,26 @@ def request_remaining_files(id):
     
 
     global lock , clients_chunks, map_chunk_id_to_ind, HEADER_SIZE , TOTAL_SIZE
-          
+    random_id = []
+    for i in range(0 , clients_chunks[id][-1][0]):
+        random_id.append(i)
+
+    if random_request == True :
+        p = random_id.pop()
+
+        random.shuffle(random_id)
+        random_id.append(p)
     for chunk_id in range(clients_chunks[id][-1][0]):
-        if chunk_id  in map_chunk_id_to_ind[id]  :
+
+        if random_id[chunk_id] in map_chunk_id_to_ind[id]  :
             RTT[id].append(0)
             pass
         else:
-            request_chunk(chunk_id , id)
-            
+            # print(f'Client #{id} requesting chunk #{random_id[chunk_id]}')
+            request_chunk(random_id[chunk_id] , id)
 
+            
+    print(f'Client #{id} has received all missing chunks')
     server_ADDR_TCP_random = (server, 9000+id)
     client_TCP_random = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_TCP_random.connect(server_ADDR_TCP_random)
@@ -326,6 +343,7 @@ def request_remaining_files(id):
     client_TCP_random.send(sending)
     
     client_TCP_random.close()
+
     request_chunk(-1  , id )     
             
 RRA_threads = [] 
@@ -402,9 +420,9 @@ end_time = time.time()
 
 
 
-
 time_taken = float(end_time - start_time)
 logger.info(f'Total time taken for acquiring missing chunks = {time_taken} seconds')
+print(f'Total time taken for acquiring missing chunks = {time_taken} seconds')
 numchunks = len(clients_chunks[0]) 
 average_rtt = time_taken / numchunks
 logger.info(f'Total number of chunks = {numchunks}')

@@ -1,3 +1,4 @@
+from __future__ import barry_as_FLUFL
 from asyncio.log import logger
 from base64 import encode
 import chunk
@@ -15,8 +16,10 @@ from sqlite3 import Connection
 import threading
 from xmlrpc.client import Server
 from collections import OrderedDict
- 
+
 import logging
+
+
 logging.basicConfig(filename="stds.log", 
 					format='%(asctime)s %(message)s', 
 					filemode='w')
@@ -59,8 +62,6 @@ server_broadcast_sock = []
 
 server_broadcast_tcp = [] 
 
-server_UDP_random_broadcast = [] 
-
 NUM_CLIENTS  = 5
 
 SERVER = '0.0.0.0'
@@ -69,11 +70,12 @@ bytes_sent_len = []
 
 DISCONNECT_MSG = "!DISCONNECT"
 
+ACKNOWLEDGEMENT_SIZE = 10
 
 ADDR_SERVER_UDP = (SERVER , PORT_SERVER_UDP)
 server_UDP = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 server_UDP.bind(ADDR_SERVER_UDP)
-
+server_UDP.settimeout(0.5)
 
 ADDR_SERVER_TCP =   (SERVER , PORT_SERVER_TCP)
 
@@ -128,14 +130,11 @@ def new_connection():                           #not implemented for udp
         print(f'appending udp and tcp ports to list ....')
 
         client_port_id.append((conn_TCP, addr_UDP))
-        server_UDP_random = socket.socket(socket.AF_INET , socket.SOCK_DGRAM)
-        server_UDP_random_broadcast.append(server_UDP_random)
-
-
         if len(client_port_id) == NUM_CLIENTS:
-            print(client_port_id)
+            
             break
      
+
 def decode_headers(headers):       #return chunk_id , chunk_size
     if(headers[0] == '#'):
         chunk_list_size = int(headers[1:HEADER_SIZE])
@@ -143,10 +142,6 @@ def decode_headers(headers):       #return chunk_id , chunk_size
     chunk_id = int(headers[0:CHUNK_ID_SIZE])
     chunk_size = int(headers[CHUNK_ID_SIZE : HEADER_SIZE])
     return chunk_id , chunk_size
-
-
-
-
 
 def make_header(chunk_id ,  chunk_size ):
     global CHUNK_ID_SIZE , CHUNK_SIZE_SIZE 
@@ -163,6 +158,8 @@ def make_header(chunk_id ,  chunk_size ):
 def adjust_data_size(data):
     data += b' '*(CHUNK_SIZE - len(data))
     return data
+
+
 
 
 #encoding the file and making 1kb chunks  
@@ -204,38 +201,57 @@ def splitfile(filename):
             chunk_list.append(('#', data))
         return chunk_list
 
-def send_chunk(chunk , conn):
-    if chunk[0] != '#' :
-        if chunk[0]%1000 == 0 :
-            logger.info(f'sending chunk {chunk[0]} to client {conn.getpeername()} ')
-            logger.info(f'Time taken by the code is {time.time() - start_time}')
-    conn.send(chunk[1])
+def recieve_ack(chunk_id , conn ):    #ack for initial sending ...
+    ack , addr  = server_UDP.recvfrom(ACKNOWLEDGEMENT_SIZE )    
+    if addr == conn and chunk_id == int(ack.decode())  :
+        # logger.info(f'Correct Ack from client recieved for chunk #{chunk_id}')
+
+
+        return True 
+    else :
+        # logger.info(f'Incorrect ack ! resending packet #{chunk_id} again')
+        return False 
+
+
+def send_chunk(chunk , conn , chunk_id):
+    logger.info(f'sending chunk {chunk[0]} to client {conn} ')
+    while True : 
+        server_UDP.sendto(chunk[1] , conn)
+        try :
+            # logger.info(f'Acknowledgement received ... checking if the acknowledgement is correct!')
+            if recieve_ack(chunk_id , conn):
+                break
+
+            break 
+        except socket.timeout:
+            # logger.info(f'The acknowledgement from the client #{conn[1]} not recieved. Resending chunk #{chunk[0]}')
+            pass
+
     
-
-
 def distribute_file_to_clients(filename):
     chunk_list = splitfile(filename)
     for i in range(len(chunk_list)):
-        if i%1000 == 0  :
-            print(f'Sending chunk #{i} to client #{i%NUM_CLIENTS}')
-        send_chunk(chunk_list[i], client_port_id[i%NUM_CLIENTS][0])
-    
-#udp ports to recieve chunk request from the clients 
+        print(f'Sending chunk #{i} to client #{i%NUM_CLIENTS}')
+        send_chunk(chunk_list[i], client_port_id[i%NUM_CLIENTS][1], i )#sending via udp 
 
 
-def setup_broadcast():
+# server ports to recieve requested chunks 
+
+def setup_udp_receive_chunks():
     for i in range(NUM_CLIENTS):
-        #udp socket init
+        #udp sockets for recieving requested chunks from the clients
 
-        print('setting up broadcast....')
+        print('setting up udp server ports....')
         server_UDP = socket.socket(socket.AF_INET , socket.SOCK_DGRAM)
         server_UDP.bind((SERVER , 7000+i))
+        server_UDP.settimeout(5)
         server_cnct_msg_udp = 'HELLO!'  #sending hi to server to save addr
         server_cnct_msg_udp = server_cnct_msg_udp.encode(ENCODING)
         server_UDP.sendto(server_cnct_msg_udp,client_port_id[0][1])
-        print(f'The server port# {server_UDP.getsockname()[1]} is connected(udp) and ready for broadcast!')
+        print(f'The server port# {server_UDP.getsockname()[1]} is connected(udp) and ready to receive requested chunks!')
         server_broadcast_sock.append(server_UDP)
 
+# ports to receive requests from the client. 
 
 def init_tcp_ports_broadcast():
     for i in range(NUM_CLIENTS):
@@ -246,8 +262,12 @@ def init_tcp_ports_broadcast():
         server_TCP.bind(ADDR_SERVER_TCP)
         server_TCP.listen()
         server_broadcast_tcp.append(server_TCP)
-        print(f'tcp broadcast reply receiver #{i} initialised !')
+        print(f'tcp broadcasting server #{i} initialised !')
 
+
+#broadcasting request to all clients using tcp ports 
+
+#code.....
 
 
 def broadcast(request , udp_client_port):
@@ -262,121 +282,130 @@ def broadcast(request , udp_client_port):
 
     enc_req = h1 + h2 
 
-    server_UDP_random = socket.socket(socket.AF_INET , socket.SOCK_DGRAM)
+
     for id in range(NUM_CLIENTS):
-        if request != '#':
-            if request%1000 == 0:
-                pass
-                # print(f'requesting chunk #{request} from client #{id}')
-        server_UDP_random_broadcast[id].sendto(enc_req ,client_port_id[id][1])
+        server_TCP_random = socket.socket(socket.AF_INET , socket.SOCK_STREAM)
+        ADDR_client_TCP=   (SERVER , 4000+id)
 
+        server_TCP_random.connect(ADDR_client_TCP)
+        # print(f'requesting chunk #{request} from client #{id}')
+        server_TCP_random.send(enc_req)
+        server_TCP_random.close()
 
-#server tcp ports to recieve chunks from the clients 
-
-def accept_tcp(id):
-    global lock , server_broadcast_tcp, duplicate, all_pack_rec, all_pack_rec_lis
+# server recieving the requested(broadcasted) chunk 
+def accept_udp(id):
+    global lock , duplicate, all_pack_rec, all_pack_rec_lis
     
     while True :
+        if(all_pack_rec == NUM_CLIENTS ):
+            logger.info(f'closing server tcp acceptor #{id} !')
+            break
         
 
-        conn_TCP , addr_TCP = server_broadcast_tcp[id].accept()
-        msg = conn_TCP.recv(TOTAL_SIZE)
+        # conn_TCP , addr_TCP = server_broadcast_tcp[id].accept()
+        # msg = conn_TCP.recv(TOTAL_SIZE)
+        try:
+            msg, addr_UDP = server_broadcast_sock[id].recvfrom(TOTAL_SIZE)
+        except socket.timeout:
+            break
+            
+
         header = msg[0:HEADER_SIZE]
         header = header.decode()
         chunk_id , chunk_size = decode_headers(header)
-        if(chunk_id == -1 ):
-            #logger.info(f'closing server tcp acceptor #{id} !')
-            break
-        # if chunk_id != '#':
-        #     if chunk_id %1000 == 0: 
+        
 
-                # print(f'chunk #{chunk_id} recieved by tcp server #{id}')
+        # print(f'chunk #{chunk_id} recieved by tcp server #{id}')
         data = msg[HEADER_SIZE:]
 
         lru_cache.put(chunk_id , data[:chunk_size])
         
-        # if chunk_id %1000 == 0 :
-        #     print(f'Requested chunk of #{chunk_id} received by server from {addr_TCP[1]}')
+
+        # print(f'Requested chunk of #{chunk_id} received by server from {addr_UDP[1]}')
         
-
-                
-HCC_threads = [] 
+TCP_threads = []
 
 
 
-sent_from_cache  = 0 
-
-
-
+#code from here .................................................
 def send_reqeuested_chunk(id):
     #recieving request
     global lock , lru_cache , server_broadcast_sock, sent_from_cache, all_pack_rec, all_pack_rec_lis
-    
 
     connected = True
     while connected:
 
-        #logger.info(f'Taking request from client #{id}')
+        logger.info(f'Taking request from client #{id}')
 
-                    
-        request, addr_UDP = server_broadcast_sock[id].recvfrom(REQUEST_SIZE)
+        conn_TCP , addr_TCP = server_broadcast_tcp[id].accept()
+        request = conn_TCP.recv(REQUEST_SIZE)
+
+        # request, addr_UDP = server_broadcast_sock[id].recvfrom(REQUEST_SIZE)
         request = int(request.decode())
-        # if request%1000 == 0:
-            ##logger.info(f'client #{id} requested chunk #{request} from the server and time taken for code is {time.time() - start_time}')
+        logger.info(f'client #{id} requested chunk #{request} from the server')
 
         if(request == -1):
             all_pack_rec += 1 
             all_pack_rec_lis[id] = True 
-            # logger.info(f'clients with complete packets = {all_pack_rec}')
+            logger.info(f'clients with complete packets = {all_pack_rec}')
             if all_pack_rec == NUM_CLIENTS:
-                broadcast(-1 , addr_UDP[1] - 6000)
+                broadcast(-1 , addr_TCP[1] - 9000)
             connected = False 
             break
         else :
             
             i = lru_cache.get(request)
             
-            
             if(i == -1):
                 
-                ##logger.info(f'server does not have the requested chunk #{request} broadcasting...')
-                reloop = True 
+                logger.info(f'server does not have the requested chunk #{request} broadcasting...')
+                break_loop = False 
 
-                while reloop :
-                    reloop = False 
-                    
-                    broadcast(request , addr_UDP[1] - 6000)
+                while break_loop == False  :
+                    break_loop =True 
+               
+                    broadcast(request , addr_TCP[1] - 9000)
                     timeout = time.time() + 5
                     while lru_cache.get(request) == -1  :
-                        if time.time() > timeout:
-                            reloop = True 
-                            break
+                        if time.time() > timeout:  #code this 
+                            #broadcast(request , addr_TCP[1] - 9000)
+                            print(f'client #{id} Re requesting chunk #{request}')
+                            break_loop = False 
+                            break 
                         pass
-                    
+                   
+                     
                 i = lru_cache.get(request)
                 chunk = i  
+                if type(i) == int :
+                    print(i)
                 header = make_header(request , len(chunk) )
                 
                 send_chunk = header + chunk 
 
-                #need to send the requested chunk to the tcp 
+                #need to send the requested chunk to the udp
 
-                ADDR_client_TCP=   (SERVER , 4000+id)
-                server_TCP_random = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                server_TCP_random.connect(ADDR_client_TCP)
-                server_TCP_random.send(send_chunk)
-                server_TCP_random.close()
+                # ADDR_client_TCP=   (SERVER , 4000+id)
+                # server_TCP_random = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                # server_TCP_random.connect(ADDR_client_TCP)
+                # server_TCP_random.send(send_chunk)
+                server_UDP_random = socket.socket(socket.AF_INET , socket.SOCK_DGRAM)
+                server_UDP_random.sendto(send_chunk ,client_port_id[id][1])
+
+
+
                 
             else : 
                 chunk = i     
                 header = make_header(request , len(chunk) )
                 
                 send_chunk = header + chunk 
-                ADDR_client_TCP=   (SERVER ,4000+id)
-                server_TCP_random = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                server_TCP_random.connect(ADDR_client_TCP)
-                server_TCP_random.send(send_chunk)
-                server_TCP_random.close()
+                # ADDR_client_TCP=   (SERVER ,4000+id)
+                # server_TCP_random = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                # server_TCP_random.connect(ADDR_client_TCP)
+                # server_TCP_random.send(send_chunk)
+                server_UDP_random = socket.socket(socket.AF_INET , socket.SOCK_DGRAM)
+                server_UDP_random.sendto(send_chunk ,client_port_id[id][1])
 
 
 
@@ -384,43 +413,35 @@ def send_reqeuested_chunk(id):
 
 TCP_threads = []
 
+
 def handle_client_chunks():
     print(f'init hearing')
     for id in range (NUM_CLIENTS):
-        thread = threading.Thread(target=accept_tcp, args=(id,))
+        thread = threading.Thread(target=accept_udp, args=(id,))
         thread.start()
         TCP_threads.append(thread)
                   
-
 HCR_threads = [] 
+
 def handle_client_request():
     for id in range(NUM_CLIENTS):
         thread = threading.Thread(target=send_reqeuested_chunk, args=(id,))
         thread.start()
       
-    
 
 new_connection()
 
-# update the location of the file 
 distribute_file_to_clients('OneDrive_1_7-9-2022/A2_small_file.txt')
-os.remove('OneDrive_1_7-9-2022/A2_small_file.txt')
-# send_reqeuested_chunk(client_port_id[0] , 0)
+# os.remove('OneDrive_1_7-9-2022/A2_small_file.txt')
+
+setup_udp_receive_chunks()
 init_tcp_ports_broadcast()
 
-
-setup_broadcast()
 handle_client_request()         
 handle_client_chunks()
 
-for x in HCR_threads:
-    x.join()
 for x in TCP_threads:
     x.join()
 
-
 end_time = time.time() 
-
-logger.info(f'Total time taken by the code = {end_time - start_time} seconds')
-
-
+logger.info(f'Total time taken by the code = {end_time - start_time}')

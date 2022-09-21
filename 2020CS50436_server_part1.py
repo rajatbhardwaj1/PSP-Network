@@ -107,7 +107,7 @@ class LRUCache:
         if len(self.cache) > self.capacity:
             self.cache.popitem(last = False)
 
-lru_cache = LRUCache(NUM_CLIENTS)      
+lru_cache = LRUCache(5)      
 
 def new_connection():                           #not implemented for udp
     # conn_UDP , addr_UDP = server_UDP.accept()
@@ -208,7 +208,7 @@ def send_chunk(chunk , conn):
     if chunk[0] != '#' :
         if chunk[0]%1000 == 0 :
             logger.info(f'sending chunk {chunk[0]} to client {conn.getpeername()} ')
-            logger.info(f'Time taken by the code is {time.time() - start_time}')
+            # logger.info(f'Time taken by the code is {time.time() - start_time}')
     conn.send(chunk[1])
     
 
@@ -245,9 +245,13 @@ def init_tcp_ports_broadcast():
         server_TCP.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_TCP.bind(ADDR_SERVER_TCP)
         server_TCP.listen()
+        server_TCP.settimeout(5)
         server_broadcast_tcp.append(server_TCP)
         print(f'tcp broadcast reply receiver #{i} initialised !')
 
+
+def broadcast_thread(enc_req , id ):
+    server_UDP_random_broadcast[id].sendto(enc_req ,client_port_id[id][1])
 
 
 def broadcast(request , udp_client_port):
@@ -268,7 +272,8 @@ def broadcast(request , udp_client_port):
             if request%1000 == 0:
                 pass
                 # print(f'requesting chunk #{request} from client #{id}')
-        server_UDP_random_broadcast[id].sendto(enc_req ,client_port_id[id][1])
+        threadtemp = threading.Thread(target= broadcast_thread , args= (enc_req, id))
+        threadtemp.start()
 
 
 #server tcp ports to recieve chunks from the clients 
@@ -278,15 +283,17 @@ def accept_tcp(id):
     
     while True :
         
-
-        conn_TCP , addr_TCP = server_broadcast_tcp[id].accept()
+        try:
+            conn_TCP , addr_TCP = server_broadcast_tcp[id].accept()
+        except socket.timeout:
+            break
         msg = conn_TCP.recv(TOTAL_SIZE)
         header = msg[0:HEADER_SIZE]
         header = header.decode()
         chunk_id , chunk_size = decode_headers(header)
-        if(chunk_id == -1 ):
-            #logger.info(f'closing server tcp acceptor #{id} !')
-            break
+        # if(chunk_id == -1 ):
+        #     logger.info(f'closing server tcp acceptor #{id} !')
+        #     break
         # if chunk_id != '#':
         #     if chunk_id %1000 == 0: 
 
@@ -404,8 +411,7 @@ new_connection()
 
 # update the location of the file 
 distribute_file_to_clients('OneDrive_1_7-9-2022/A2_small_file.txt')
-os.remove('OneDrive_1_7-9-2022/A2_small_file.txt')
-# send_reqeuested_chunk(client_port_id[0] , 0)
+# os.remove('OneDrive_1_7-9-2022/A2_small_file.txt')
 init_tcp_ports_broadcast()
 
 
